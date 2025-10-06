@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Matrix Digital Rain</title>
+  <style>
+    :root{
+      --bg:#000;
+      --fg:#0f0;
+      --lead:#c8ffc8;
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Noto Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'Microsoft YaHei UI', Arial, sans-serif;}
+    canvas{display:block;width:100vw;height:100vh;position:fixed;inset:0;}
+    .hud{position:fixed;left:12px;bottom:12px;background:#0009;border:1px solid #0a0;padding:10px 12px;border-radius:12px;font-size:12px;line-height:1.35;backdrop-filter: blur(2px); user-select:none}
+    .hud kbd{background:#061; border:1px solid #0a0; padding:1px 6px; border-radius:6px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11px}
+    .hud .row{margin:2px 0}
+    .hud .val{color:var(--lead)}
+    .brand{position:fixed;right:12px;bottom:12px;color:#0a0;font-size:12px;opacity:.5;letter-spacing:.2em}
+    .hidden{display:none}
+  </style>
+</head>
+<body>
+  <canvas id="matrix"></canvas>
+  <div class="hud" id="hud">
+    <div class="row"><strong>Matrix Rain</strong> — live controls</div>
+    <div class="row"><kbd>Space</kbd> pause/resume • <kbd>S</kbd> switch charset • <kbd>G</kbd> glow • <kbd>B</kbd> bg </div>
+    <div class="row"><kbd>↑/↓</kbd> density <span class="val" id="vDensity"></span> • <kbd>←/→</kbd> speed <span class="val" id="vSpeed"></span></div>
+    <div class="row"><kbd>[/]</kbd> size variance <span class="val" id="vVar"></span> • <kbd>R</kbd> reset</div>
+  </div>
+  <div class="brand">MATRIX</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('matrix');
+  const ctx = canvas.getContext('2d');
+
+  // --- Character sets (inspired by the films) ---
+  const SETS = [
+    // Canon: latin + numerals + katakana
+    "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    // Dense symbols
+    "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789@#$%&*+=-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    // Minimal numeric
+    "0123456789",
+  ];
+
+  // --- Configurable parameters ---
+  const config = {
+    charsetIndex: 0,
+    baseFont: 18,          // base font size in px
+    sizeVariance: 0.6,     // 0..1 variance across columns
+    speed: 1.0,            // global speed multiplier
+    density: 1.0,          // columns density (1.0 = base)
+    glow: true,            // neon glow
+    bgMode: 0,             // 0 black, 1 very dark gradient, 2 desaturated scanline
+    paused: false,
+  };
+
+  // HUD bindings
+  const vDensity = document.getElementById('vDensity');
+  const vSpeed = document.getElementById('vSpeed');
+  const vVar = document.getElementById('vVar');
+  const hud = document.getElementById('hud');
+  const updateHUD = () => {
+    vDensity.textContent = `×${config.density.toFixed(2)}`;
+    vSpeed.textContent = `×${config.speed.toFixed(2)}`;
+    vVar.textContent = `${Math.round(config.sizeVariance*100)}%`;
+  };
+
+  // --- Handle high DPI and resizing ---
+  const state = {
+    w: 0,
+    h: 0,
+    dpr: Math.max(1, Math.min(2, window.devicePixelRatio || 1)),
+    columns: [],
+  };
+
+  function resize(){
+    const { innerWidth: cssW, innerHeight: cssH } = window;
+    state.w = Math.floor(cssW * state.dpr);
+    state.h = Math.floor(cssH * state.dpr);
+    canvas.width = state.w;
+    canvas.height = state.h;
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+    spawnColumns();
+  }
+  window.addEventListener('resize', resize);
+
+  // --- Column / Stream model ---
+  function rand(min, max){ return Math.random()*(max-min)+min; }
+  function choice(arr){ return arr[(Math.random()*arr.length)|0]; }
+
+  function spawnColumns(){
+    const charset = SETS[config.charsetIndex];
+    const base = config.baseFont * state.dpr; // scale font for DPR
+    const minSize = Math.max(10, base * (1 - config.sizeVariance));
+    const maxSize = base * (1 + config.sizeVariance);
+
+    // Desired column width roughly equals font size.
+    // Compute number of columns from an average font size.
+    const avgSize = (minSize + maxSize) / 2;
+    const colWidth = avgSize;
+    const idealCols = Math.floor(state.w / colWidth * config.density);
+
+    state.columns = new Array(Math.max(1, idealCols)).fill(0).map((_, i) => {
+      const fontSize = rand(minSize, maxSize);
+      const x = Math.floor((i + Math.random()*0.2) * (state.w / idealCols));
+      const speed = rand(0.6, 1.6) * fontSize * 0.035; // speed scales with size
+      return {
+        x,
+        y: rand(-state.h, 0),
+        fontSize,
+        step: Math.max(12, Math.floor(rand(12, 28))), // how many chars visible in the tail
+        velocity: speed,
+        trail: [],
+        charset,
+      };
+    });
+  }
+
+  // --- Drawing ---
+  function drawBackground(){
+    if(config.bgMode === 0){
+      // subtle motion blur fade
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.fillRect(0,0,state.w,state.h);
+    } else if(config.bgMode === 1){
+      const g = ctx.createLinearGradient(0,0,0,state.h);
+      g.addColorStop(0,'rgba(0,10,0,0.3)');
+      g.addColorStop(1,'rgba(0,0,0,0.6)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0,0,state.w,state.h);
+    } else {
+      // scanline fade
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      ctx.fillRect(0,0,state.w,state.h);
+      ctx.globalCompositeOperation = 'overlay';
+      ctx.fillStyle = 'rgba(0,16,0,0.15)';
+      for(let y=0; y<state.h; y+=2){
+        ctx.fillRect(0,y,state.w,1);
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+
+  function tick(ts){
+    if(!prev) prev = ts;
+    const dt = Math.min(32, ts - prev); // cap delta
+    prev = ts;
+
+    drawBackground();
+
+    ctx.textBaseline = 'top';
+
+    for(const col of state.columns){
+      // Update stream
+      col.y += col.velocity * config.speed;
+      if(col.y - col.step*col.fontSize > state.h){
+        // recycle to the top with new params
+        col.y = rand(-state.h*0.5, 0);
+        col.fontSize = col.fontSize * rand(0.85,1.15);
+        col.velocity = Math.max(0.2, col.velocity * rand(0.8,1.25));
+      }
+
+      // Draw the trail
+      const x = col.x | 0;
+      const count = col.step;
+      // Leading character (bright)
+      ctx.font = `${col.fontSize}px monospace`;
+      for(let i=0;i<count;i++){
+        const y = (col.y - i*col.fontSize) | 0;
+        if(y < -col.fontSize || y > state.h) continue;
+        const ch = col.charset.charAt((Math.random()*col.charset.length)|0);
+        if(i===0){
+          ctx.fillStyle = config.glow ? '#c8ffc8' : '#aaffaa';
+          if(config.glow){
+            ctx.shadowColor = '#8f8';
+            ctx.shadowBlur = Math.max(4, col.fontSize*0.25);
+          }
+          ctx.fillText(ch, x, y);
+          if(config.glow){ ctx.shadowBlur = 0; }
+        } else {
+          // fade the tail
+          const alpha = Math.max(0, 1 - i/(count+2));
+          ctx.fillStyle = `rgba(0,255,0,${alpha*0.9})`;
+          ctx.fillText(ch, x, y);
+        }
+      }
+    }
+
+    if(!config.paused){
+      requestAnimationFrame(tick);
+    } else {
+      // draw a subtle paused overlay
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(0,0,state.w,state.h);
+      ctx.fillStyle = '#0f0';
+      ctx.font = `${16*state.dpr}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+      ctx.fillText('⏸ Paused', 10*state.dpr, 10*state.dpr);
+    }
+  }
+
+  let prev = 0;
+
+  function start(){
+    resize();
+    // paint solid background once so first frame has no ghosting
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0,0,state.w,state.h);
+    updateHUD();
+    requestAnimationFrame(tick);
+  }
+
+  // --- Keyboard controls ---
+  window.addEventListener('keydown', (e) => {
+    switch(e.key){
+      case ' ': // pause
+        config.paused = !config.paused;
+        if(!config.paused){ prev = 0; requestAnimationFrame(tick); }
+        e.preventDefault();
+        break;
+      case 's': case 'S':
+        config.charsetIndex = (config.charsetIndex + 1) % SETS.length;
+        for(const c of state.columns) c.charset = SETS[config.charsetIndex];
+        break;
+      case 'g': case 'G':
+        config.glow = !config.glow; break;
+      case 'b': case 'B':
+        config.bgMode = (config.bgMode + 1) % 3; break;
+      case 'ArrowUp':
+        config.density = Math.min(2.5, +(config.density + 0.05).toFixed(2));
+        spawnColumns(); updateHUD(); break;
+      case 'ArrowDown':
+        config.density = Math.max(0.25, +(config.density - 0.05).toFixed(2));
+        spawnColumns(); updateHUD(); break;
+      case 'ArrowRight':
+        config.speed = Math.min(3.0, +(config.speed + 0.05).toFixed(2));
+        updateHUD(); break;
+      case 'ArrowLeft':
+        config.speed = Math.max(0.1, +(config.speed - 0.05).toFixed(2));
+        updateHUD(); break;
+      case '[':
+        config.sizeVariance = Math.max(0.0, +(config.sizeVariance - 0.05).toFixed(2));
+        spawnColumns(); updateHUD(); break;
+      case ']':
+        config.sizeVariance = Math.min(1.0, +(config.sizeVariance + 0.05).toFixed(2));
+        spawnColumns(); updateHUD(); break;
+      case 'r': case 'R':
+        Object.assign(config, { baseFont:18, sizeVariance:0.6, speed:1.0, density:1.0, glow:true, bgMode:0 });
+        spawnColumns(); updateHUD(); break;
+    }
+  }, {passive:false});
+
+  // --- Visibility handling (pause when tab hidden) ---
+  document.addEventListener('visibilitychange', () => {
+    if(document.hidden){
+      config.paused = true;
+    } else {
+      config.paused = false; prev = 0; requestAnimationFrame(tick);
+    }
+  });
+
+  start();
+})();
+</script>
+</body>
+</html>
