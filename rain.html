@@ -3,68 +3,21 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Matrix Digital Rain Enhanced</title>
+  <title>Matrix Digital Rain</title>
   <style>
-    :root {
-      --bg: #000;
-      --fg: #0f0;
-      --lead: #c8ffc8;
+    :root{
+      --bg:#000;
+      --fg:#0f0;
+      --lead:#c8ffc8;
     }
-    html, body {
-      height: 100%;
-      margin: 0;
-      background: var(--bg);
-      color: var(--fg);
-      font-family: monospace, system-ui;
-    }
-    canvas {
-      display: block;
-      width: 100vw;
-      height: 100vh;
-      position: fixed;
-      inset: 0;
-    }
-    .hud {
-      position: fixed;
-      left: 12px;
-      bottom: 12px;
-      background: #0009;
-      border: 1px solid #0a0;
-      padding: 10px 12px;
-      border-radius: 12px;
-      font-size: 12px;
-      line-height: 1.35;
-      backdrop-filter: blur(2px);
-      user-select: none;
-      z-index: 10;
-    }
-    .hud kbd {
-      background: #061;
-      border: 1px solid #0a0;
-      padding: 1px 6px;
-      border-radius: 6px;
-      font-family: monospace;
-      font-size: 11px;
-    }
-    .hud .row {
-      margin: 2px 0;
-    }
-    .hud .val {
-      color: var(--lead);
-    }
-    .brand {
-      position: fixed;
-      right: 12px;
-      bottom: 12px;
-      color: #0a0;
-      font-size: 12px;
-      opacity: .5;
-      letter-spacing: .2em;
-      z-index: 10;
-    }
-    .hidden {
-      display: none !important;
-    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Noto Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'Microsoft YaHei UI', Arial, sans-serif;}
+    canvas{display:block;width:100vw;height:100vh;position:fixed;inset:0;}
+    .hud{position:fixed;left:12px;bottom:12px;background:#0009;border:1px solid #0a0;padding:10px 12px;border-radius:12px;font-size:12px;line-height:1.35;backdrop-filter: blur(2px); user-select:none}
+    .hud kbd{background:#061; border:1px solid #0a0; padding:1px 6px; border-radius:6px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11px}
+    .hud .row{margin:2px 0}
+    .hud .val{color:var(--lead)}
+    .brand{position:fixed;right:12px;bottom:12px;color:#0a0;font-size:12px;opacity:.5;letter-spacing:.2em}
+    .hidden{display:none !important}
   </style>
 </head>
 <body>
@@ -72,52 +25,67 @@
 
   <div class="hud" id="hud">
     <div class="row"><strong>Matrix Rain</strong> — live controls</div>
-    <div class="row"><kbd>Space</kbd> pause • <kbd>S</kbd> charset • <kbd>G</kbd> glow • <kbd>B</kbd> bg • <kbd>H</kbd> HUD</div>
-    <div class="row"><kbd>↑/↓</kbd> density <span class="val" id="vDensity"></span> • <kbd>←/→</kbd> speed <span class="val" id="vSpeed"></span></div>
-    <div class="row"><kbd>[ / ]</kbd> size var <span class="val" id="vVar"></span> • <kbd>{ / }</kbd> change <span class="val" id="vRate"></span>ms</div>
+    <div class="row">
+      <kbd>Space</kbd> pause • <kbd>H</kbd> hide UI •
+      <kbd>S</kbd> charset • <kbd>G</kbd> glow • <kbd>B</kbd> bg
+    </div>
+    <div class="row">
+      <kbd>↑/↓</kbd> density <span class="val" id="vDensity"></span> •
+      <kbd>←/→</kbd> speed <span class="val" id="vSpeed"></span>
+    </div>
+    <div class="row">
+      <kbd>[ / ]</kbd> size variance <span class="val" id="vVar"></span> •
+      <kbd>{ / }</kbd> change rate <span class="val" id="vRate"></span>
+    </div>
+    <div class="row"><kbd>R</kbd> reset</div>
   </div>
 
-  <div class="brand">MATRIX</div>
+  <div class="brand" id="brand">MATRIX</div>
 
-  <script>
+<script>
 (() => {
   const canvas = document.getElementById('matrix');
   const ctx = canvas.getContext('2d');
 
+  // --- Character sets ---
   const SETS = [
-    // Canon
+    // Canon (default): katakana + numerals + latin
     "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-    // Fantasy
+    // Fantasy: runes + astro + numerals
     "ᚠᚢᚦᚨᚱᚲᚷᚺᚾᛁᛃᛇᛈᛉᛋᛏᛒᛖᛗᛚᛝᛟᛞ♄☉☽☿♃♀♂⚕⚡♈♉♊♋♌♍♎♏♐♑♒♓0123456789",
-    // Modern
+    // Modern: symbols/currencies/tech + latin
     "@#$€¥£¢§†±≈≠√∆∑∏πµΩ∫∞∇∂←↑→↓↔↕⇌≡☑☒™©®0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
   ];
 
+  // --- Config ---
   const config = {
     charsetIndex: 0,
-    baseFont: 18,
-    sizeVariance: 0.6,
-    speed: 1.0,
-    density: 1.0,
-    glow: true,
-    bgMode: 0,
+    baseFont: 18,      // px
+    sizeVariance: 0.6, // 0..1
+    speed: 1.0,        // fall multiplier
+    density: 1.0,      // column density
+    glow: true,        // lead neon
+    bgMode: 0,         // 0:fade, 1:gradient, 2:scanline
     paused: false,
-    changeRate: 50 // ms between symbol changes
+    changeRate: 50     // ms between glyph changes (per trail cell)
   };
 
+  // HUD bindings
   const vDensity = document.getElementById('vDensity');
-  const vSpeed = document.getElementById('vSpeed');
-  const vVar = document.getElementById('vVar');
-  const vRate = document.getElementById('vRate');
-  const hud = document.getElementById('hud');
+  const vSpeed   = document.getElementById('vSpeed');
+  const vVar     = document.getElementById('vVar');
+  const vRate    = document.getElementById('vRate');
+  const hud      = document.getElementById('hud');
+  const brandEl  = document.getElementById('brand');
 
   const updateHUD = () => {
     vDensity.textContent = `×${config.density.toFixed(2)}`;
-    vSpeed.textContent = `×${config.speed.toFixed(2)}`;
-    vVar.textContent = `${Math.round(config.sizeVariance * 100)}%`;
-    vRate.textContent = `${config.changeRate}ms`;
+    vSpeed.textContent   = `×${config.speed.toFixed(2)}`;
+    vVar.textContent     = `${Math.round(config.sizeVariance*100)}%`;
+    vRate.textContent    = `${config.changeRate}ms`;
   };
 
+  // --- State & resize ---
   const state = {
     w: 0,
     h: 0,
@@ -125,7 +93,7 @@
     columns: [],
   };
 
-  function resize() {
+  function resize(){
     const { innerWidth: cssW, innerHeight: cssH } = window;
     state.w = Math.floor(cssW * state.dpr);
     state.h = Math.floor(cssH * state.dpr);
@@ -135,175 +103,212 @@
     canvas.style.height = cssH + 'px';
     spawnColumns();
   }
-
   window.addEventListener('resize', resize);
 
-  function rand(min, max) {
-    return Math.random() * (max - min) + min;
-  }
+  // --- Utils ---
+  const rand = (min, max) => Math.random() * (max - min) + min;
 
-  function spawnColumns() {
+  // --- Column / Stream model ---
+  function spawnColumns(){
     const charset = SETS[config.charsetIndex];
-    const base = config.baseFont * state.dpr;
+    const base = config.baseFont * state.dpr; // DPR scaled
     const minSize = Math.max(10, base * (1 - config.sizeVariance));
     const maxSize = base * (1 + config.sizeVariance);
     const avgSize = (minSize + maxSize) / 2;
-    const colWidth = avgSize;
-    const idealCols = Math.floor(state.w / colWidth * config.density);
 
-    state.columns = new Array(Math.max(1, idealCols)).fill(0).map((_, i) => {
+    const idealCols = Math.max(1, Math.floor(state.w / avgSize * config.density));
+    state.columns = new Array(idealCols).fill(0).map((_, i) => {
       const fontSize = rand(minSize, maxSize);
-      const x = Math.floor((i + Math.random() * 0.2) * (state.w / idealCols));
-      const speed = rand(0.6, 1.6) * fontSize * 0.035;
+      const x = Math.floor((i + Math.random()*0.2) * (state.w / idealCols));
+      const velocity = rand(0.6, 1.6) * fontSize * 0.035; // scales w/ size
+      const step = Math.max(12, Math.floor(rand(12, 28))); // visible trail length
+
+      // Live-writing buffers: per-trail cell char + timestamp
+      const trailChars = new Array(step).fill('');
+      const lastChange = new Array(step).fill(0);
+
       return {
         x,
         y: rand(-state.h, 0),
         fontSize,
-        step: Math.max(12, Math.floor(rand(12, 28))),
-        velocity: speed,
+        step,
+        velocity,
         charset,
-        lastChange: 0,
-        trailChars: []
+        trailChars,
+        lastChange
       };
     });
   }
 
-  function drawBackground() {
-    if (config.bgMode === 0) {
+  // --- Background pass ---
+  function drawBackground(){
+    if(config.bgMode === 0){
+      // motion blur fade
       ctx.fillStyle = 'rgba(0,0,0,0.12)';
-      ctx.fillRect(0, 0, state.w, state.h);
-    } else if (config.bgMode === 1) {
-      const g = ctx.createLinearGradient(0, 0, 0, state.h);
-      g.addColorStop(0, 'rgba(0,10,0,0.3)');
-      g.addColorStop(1, 'rgba(0,0,0,0.6)');
+      ctx.fillRect(0,0,state.w,state.h);
+    } else if(config.bgMode === 1){
+      const g = ctx.createLinearGradient(0,0,0,state.h);
+      g.addColorStop(0,'rgba(0,10,0,0.3)');
+      g.addColorStop(1,'rgba(0,0,0,0.6)');
       ctx.fillStyle = g;
-      ctx.fillRect(0, 0, state.w, state.h);
+      ctx.fillRect(0,0,state.w,state.h);
     } else {
+      // scanline fade
       ctx.fillStyle = 'rgba(0,0,0,0.18)';
-      ctx.fillRect(0, 0, state.w, state.h);
+      ctx.fillRect(0,0,state.w,state.h);
       ctx.globalCompositeOperation = 'overlay';
       ctx.fillStyle = 'rgba(0,16,0,0.15)';
-      for (let y = 0; y < state.h; y += 2) {
-        ctx.fillRect(0, y, state.w, 1);
-      }
+      for(let y=0; y<state.h; y+=2){ ctx.fillRect(0,y,state.w,1); }
       ctx.globalCompositeOperation = 'source-over';
     }
   }
 
-  function tick(ts) {
-    if (!prev) prev = ts;
-    const dt = Math.min(32, ts - prev);
+  let prev = 0;
+  function tick(ts){
+    if(!prev) prev = ts;
+    const now = ts;
     prev = ts;
 
     drawBackground();
     ctx.textBaseline = 'top';
 
-    const now = performance.now();
-    for (const col of state.columns) {
+    for(const col of state.columns){
+      // fall
       col.y += col.velocity * config.speed;
-      if (col.y - col.step * col.fontSize > state.h) {
-        col.y = rand(-state.h * 0.5, 0);
+      if(col.y - col.step*col.fontSize > state.h){
+        // recycle
+        col.y = rand(-state.h*0.5, 0);
+        col.fontSize = col.fontSize * rand(0.85,1.15);
+        col.velocity = Math.max(0.2, col.velocity * rand(0.8,1.25));
+        // clear buffers
+        col.trailChars.fill('');
+        col.lastChange.fill(0);
       }
 
-      if (!col.trailChars.length || now - col.lastChange > config.changeRate) {
-        col.trailChars = Array.from({ length: col.step }, () =>
-          col.charset.charAt((Math.random() * col.charset.length) | 0)
-        );
-        col.lastChange = now;
-      }
-
-      const x = col.x | 0;
-      const count = col.step;
       ctx.font = `${col.fontSize}px monospace`;
-      for (let i = 0; i < count; i++) {
-        const y = (col.y - i * col.fontSize) | 0;
-        if (y < -col.fontSize || y > state.h) continue;
-        const ch = col.trailChars[i] || ' ';
-        if (i === 0) {
+      const x = col.x | 0;
+      for(let i=0;i<col.step;i++){
+        const y = (col.y - i*col.fontSize) | 0;
+        if(y < -col.fontSize || y > state.h) continue;
+
+        // Live-writing: update each trail cell only when due
+        if(col.trailChars[i] === '' || (now - col.lastChange[i]) >= config.changeRate){
+          const ch = col.charset.charAt((Math.random()*col.charset.length)|0);
+          col.trailChars[i] = ch;
+          col.lastChange[i] = now;
+        }
+        const ch = col.trailChars[i];
+
+        if(i===0){
           ctx.fillStyle = config.glow ? '#c8ffc8' : '#aaffaa';
-          if (config.glow) {
+          if(config.glow){
             ctx.shadowColor = '#8f8';
-            ctx.shadowBlur = Math.max(4, col.fontSize * 0.25);
+            ctx.shadowBlur = Math.max(4, col.fontSize*0.25);
           }
           ctx.fillText(ch, x, y);
-          ctx.shadowBlur = 0;
+          if(config.glow){ ctx.shadowBlur = 0; }
         } else {
-          const alpha = Math.max(0, 1 - i / (count + 2));
-          ctx.fillStyle = `rgba(0,255,0,${alpha * 0.9})`;
+          const alpha = Math.max(0, 1 - i/(col.step+2));
+          ctx.fillStyle = `rgba(0,255,0,${alpha*0.9})`;
           ctx.fillText(ch, x, y);
         }
       }
     }
 
-    if (!config.paused) {
+    if(!config.paused){
       requestAnimationFrame(tick);
     } else {
+      // subtle pause overlay
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.fillRect(0, 0, state.w, state.h);
+      ctx.fillRect(0,0,state.w,state.h);
       ctx.fillStyle = '#0f0';
-      ctx.font = `${16 * state.dpr}px monospace`;
-      ctx.fillText('⏸ Paused', 10 * state.dpr, 10 * state.dpr);
+      ctx.font = `${16*state.dpr}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+      ctx.fillText('⏸ Paused', 10*state.dpr, 10*state.dpr);
     }
   }
 
-  let prev = 0;
-
-  function start() {
+  function start(){
     resize();
     ctx.fillStyle = 'black';
-    ctx.fillRect(0, 0, state.w, state.h);
+    ctx.fillRect(0,0,state.w,state.h);
     updateHUD();
     requestAnimationFrame(tick);
   }
 
+  // --- Keyboard controls ---
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'h' || e.key === 'H') {
-      document.querySelectorAll('.hud, .brand').forEach(el => el.classList.toggle('hidden'));
+    // Quick HUD/brand toggle
+    if(e.key === 'h' || e.key === 'H'){
+      hud.classList.toggle('hidden');
+      brandEl.classList.toggle('hidden');
       return;
     }
-    switch (e.key) {
-      case ' ':
+
+    switch(e.key){
+      case ' ': // pause
         config.paused = !config.paused;
-        if (!config.paused) {
-          prev = 0;a
-          requestAnimationFrame(tick);
-        }
+        if(!config.paused){ prev = 0; requestAnimationFrame(tick); }
         e.preventDefault();
         break;
-      case 's': case 'S':
+
+      case 's': case 'S': // switch charset
         config.charsetIndex = (config.charsetIndex + 1) % SETS.length;
-        for (const c of state.columns) c.charset = SETS[config.charsetIndex];
+        for(const c of state.columns) c.charset = SETS[config.charsetIndex];
         break;
-      case 'g': case 'G': config.glow = !config.glow; break;
-      case 'b': case 'B': config.bgMode = (config.bgMode + 1) % 3; break;
-      case 'ArrowUp': config.density = Math.min(2.5, +(config.density + 0.05).toFixed(2)); spawnColumns(); updateHUD(); break;
-      case 'ArrowDown': config.density = Math.max(0.25, +(config.density - 0.05).toFixed(2)); spawnColumns(); updateHUD(); break;
-      case 'ArrowRight': config.speed = Math.min(3.0, +(config.speed + 0.05).toFixed(2)); updateHUD(); break;
-      case 'ArrowLeft': config.speed = Math.max(0.1, +(config.speed - 0.05).toFixed(2)); updateHUD(); break;
-      case '[': config.sizeVariance = Math.max(0.0, +(config.sizeVariance - 0.05).toFixed(2)); spawnColumns(); updateHUD(); break;
-      case ']': config.sizeVariance = Math.min(1.0, +(config.sizeVariance + 0.05).toFixed(2)); spawnColumns(); updateHUD(); break;
-      case '{': config.changeRate = Math.min(1000, config.changeRate + 25); updateHUD(); break;
-      case '}': config.changeRate = Math.max(10, config.changeRate - 25); updateHUD(); break;
+
+      case 'g': case 'G': // glow
+        config.glow = !config.glow; break;
+
+      case 'b': case 'B': // bg
+        config.bgMode = (config.bgMode + 1) % 3; break;
+
+      case 'ArrowUp':
+        config.density = Math.min(2.5, +(config.density + 0.05).toFixed(2));
+        spawnColumns(); updateHUD(); break;
+
+      case 'ArrowDown':
+        config.density = Math.max(0.25, +(config.density - 0.05).toFixed(2));
+        spawnColumns(); updateHUD(); break;
+
+      case 'ArrowRight':
+        config.speed = Math.min(3.0, +(config.speed + 0.05).toFixed(2));
+        updateHUD(); break;
+
+      case 'ArrowLeft':
+        config.speed = Math.max(0.1, +(config.speed - 0.05).toFixed(2));
+        updateHUD(); break;
+
+      case '[':
+        config.sizeVariance = Math.max(0.0, +(config.sizeVariance - 0.05).toFixed(2));
+        spawnColumns(); updateHUD(); break;
+
+      case ']':
+        config.sizeVariance = Math.min(1.0, +(config.sizeVariance + 0.05).toFixed(2));
+        spawnColumns(); updateHUD(); break;
+
+      case '{': // slower flicker
+        config.changeRate = Math.min(2000, config.changeRate + 25); updateHUD(); break;
+
+      case '}': // faster flicker
+        config.changeRate = Math.max(5, config.changeRate - 25); updateHUD(); break;
+
       case 'r': case 'R':
-        Object.assign(config, {
-          baseFont: 18, sizeVariance: 0.6, speed: 1.0, density: 1.0, glow: true, bgMode: 0, changeRate: 50
-        });
+        Object.assign(config, { baseFont:18, sizeVariance:0.6, speed:1.0, density:1.0, glow:true, bgMode:0, changeRate:50 });
         spawnColumns(); updateHUD(); break;
     }
-  }, { passive: false });
+  }, {passive:false});
 
+  // --- Visibility handling (pause when tab hidden) ---
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
+    if(document.hidden){
       config.paused = true;
     } else {
-      config.paused = false;
-      prev = 0;
-      requestAnimationFrame(tick);
+      config.paused = false; prev = 0; requestAnimationFrame(tick);
     }
   });
 
   start();
 })();
-  </script>
+</script>
 </body>
 </html>
