@@ -1,1 +1,23 @@
+    :root{
+      --bg:#000;
+      --fg:#0f0;
+      --lead:#c8ffc8;
+    }
 
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);
+      font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;}
+
+    canvas{display:block;position:fixed;inset:0;width:100vw;height:100vh}
+
+    .hud{position:fixed;left:12px;bottom:12px;background:#0009;border:1px solid #0a0;
+      padding:10px 12px;border-radius:12px;font-size:12px;line-height:1.35;backdrop-filter: blur(2px); user-select:none}
+
+    .hud kbd{background:#061;border:1px solid #0a0;padding:1px 6px;border-radius:6px;font-size:11px}
+
+    .hud .row{margin:2px 0}
+
+    .hud .val{color:var(--lead)}
+
+    .brand{position:fixed;right:12px;bottom:12px;color:#0a0;font-size:12px;opacity:.5;letter-spacing:.2em}
+
+    .hidden{display:none !important}
