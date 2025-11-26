@@ -1,0 +1,291 @@
+(() => {
+  const canvas = document.getElementById('matrix');
+  const ctx = canvas.getContext('2d');
+
+  // --- Character sets ---
+  const SETS = [
+    // Canon (default): katakana + numerals + latin
+    "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    // Fantasy: runes + astro + numerals
+    "ᚠᚢᚦᚨᚱᚲᚷᚺᚾᛁᛃᛇᛈᛉᛋᛏᛒᛖᛗᛚᛝᛟᛞ♄☉☽☿♃♀♂⚕⚡♈♉♊♋♌♍♎♏♐♑♒♓0123456789",
+    // Modern: symbols/currencies/tech + latin
+    "@#$€¥£¢§†±≈≠√∆∑∏πµΩ∫∞∇∂←↑→↓↔↕⇌≡☑☒™©®0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  ];
+
+  // --- Config (grid-based) ---
+  const config = {
+    charsetIndex: 0,
+    fontPx: 18,          // cell size (px)
+    speed: 0.1,          // fall speed multiplier (cells/sec scaled)
+    density: 1.0,        // 0..1 fraction of active columns
+    glow: true,          // lead neon
+    bgMode: 0,           // 0:fade, 1:gradient, 2:scanline
+    paused: false,
+    fadeMs: 500,         // time constant for fade (bigger = slower fade)
+    glitchChance: 0.002  // per-frame chance for a cell to randomize (rare)
+  };
+
+  // HUD bindings
+  const vSpeed  = document.getElementById('vSpeed');
+  const vDensity= document.getElementById('vDensity');
+  const vGlitch = document.getElementById('vGlitch');
+  const vFont   = document.getElementById('vFont');
+  const hud     = document.getElementById('hud');
+  const brandEl = document.getElementById('brand');
+  const updateHUD = () => {
+    vSpeed.textContent   = `×${config.speed.toFixed(2)}`;
+    vDensity.textContent = `×${config.density.toFixed(2)}`;
+    vGlitch.textContent  = `${(config.glitchChance*100).toFixed(2)}%`;
+    vFont.textContent    = `${config.fontPx}px`;
+  };
+
+  // --- State ---
+  const state = {
+    w: 0, h: 0, dpr: Math.max(1, Math.min(2, window.devicePixelRatio || 1)),
+    cols: 0, rows: 0,
+    cellW: 0, cellH: 0,
+    charset: SETS[0],
+    // Grid buffers
+    chars: [], // rows x cols (string 1-char)
+    alpha: [], // rows x cols (0..1)
+    // Column heads
+    heads: [], // one per active column: {col, yRowFloat, speedCellsPerMs}
+    activeCols: [] // boolean per col whether has a stream
+  };
+
+  function resize(){
+    const cssW = window.innerWidth;
+    const cssH = window.innerHeight;
+    state.w = Math.floor(cssW * state.dpr);
+    state.h = Math.floor(cssH * state.dpr);
+    canvas.width = state.w;
+    canvas.height = state.h;
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+
+    // recompute grid
+    const cell = Math.max(8, Math.floor(config.fontPx * state.dpr));
+    state.cellW = cell;
+    state.cellH = cell;
+    state.cols = Math.max(1, Math.floor(state.w / state.cellW));
+    state.rows = Math.max(1, Math.floor(state.h / state.cellH));
+
+    // reinit buffers
+    state.chars = new Array(state.rows);
+    state.alpha = new Array(state.rows);
+    for(let r=0; r<state.rows; r++){
+      state.chars[r] = new Array(state.cols).fill('');
+      state.alpha[r] = new Array(state.cols).fill(0);
+    }
+
+    spawnHeads();
+  }
+
+  function rand(min,max){ return Math.random()*(max-min)+min; }
+  function pickChar(){ return state.charset.charAt((Math.random()*state.charset.length)|0); }
+
+  function spawnHeads(){
+    state.charset = SETS[config.charsetIndex];
+    const total = state.cols;
+    const want = Math.max(1, Math.floor(total * config.density));
+    state.activeCols = new Array(state.cols).fill(false);
+
+    // randomly activate desired number of columns
+    const indices = [...Array(state.cols).keys()];
+    for(let i=indices.length-1;i>0;i--){
+      const j = (Math.random()*(i+1))|0;
+      [indices[i],indices[j]] = [indices[j],indices[i]];
+    }
+    for(let i=0;i<want;i++) state.activeCols[indices[i]] = true;
+
+    state.heads = [];
+    for(let c=0;c<state.cols;c++){
+      if(!state.activeCols[c]) continue;
+      // speed in cells per ms (base ~ 0.08..0.16 cells/ms) scaled by config.speed
+      const base = rand(0.08, 0.16);
+      state.heads.push({
+        col: c,
+        yRow: rand(-state.rows, 0), // start above view
+        speed: base
+      });
+    }
+  }
+
+  // --- Background pass ---
+  function drawBackground(){
+    if(config.bgMode === 0){
+      // motion blur fade
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.fillRect(0,0,state.w,state.h);
+    } else if(config.bgMode === 1){
+      const g = ctx.createLinearGradient(0,0,0,state.h);
+      g.addColorStop(0,'rgba(0,10,0,0.3)');
+      g.addColorStop(1,'rgba(0,0,0,0.6)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0,0,state.w,state.h);
+    } else {
+      // scanline fade
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      ctx.fillRect(0,0,state.w,state.h);
+      ctx.globalCompositeOperation = 'overlay';
+      ctx.fillStyle = 'rgba(0,16,0,0.15)';
+      for(let y=0; y<state.h; y+=2) ctx.fillRect(0,y,state.w,1);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+
+  // --- Render entire grid ---
+  function renderGrid(leadPositions){
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    ctx.font = `${state.cellH}px monospace`;
+
+    for(let r=0;r<state.rows;r++){
+      const y = r * state.cellH;
+      for(let c=0;c<state.cols;c++){
+        const a = state.alpha[r][c];
+        if(a <= 0) continue;
+        const x = c * state.cellW;
+        const ch = state.chars[r][c] || ' ';
+        // lead cell has its own bright style; others fade by alpha
+        if(leadPositions && leadPositions[r] && leadPositions[r].has(c)){
+          ctx.fillStyle = '#c8ffc8';
+          if(config.glow){
+            ctx.shadowColor = '#8f8';
+            ctx.shadowBlur = Math.max(4, state.cellH*0.25);
+          }
+          ctx.fillText(ch, x, y);
+          if(config.glow) ctx.shadowBlur = 0;
+        } else {
+          ctx.fillStyle = `rgba(0,255,0,${Math.max(0, Math.min(1,a))})`;
+          ctx.fillText(ch, x, y);
+        }
+      }
+    }
+  }
+
+  let prev = 0;
+  function tick(ts){
+    if(!prev) prev = ts;
+    const dt = Math.min(50, ts - prev); // cap delta a bit
+    prev = ts;
+
+    // fade factor (exponential): alpha *= exp(-dt / fadeMs)
+    const decay = Math.exp(-dt / config.fadeMs);
+
+    // advance heads and write new chars
+    const leadMap = {}; // row -> Set(cols) for bright leads
+    for(const h of state.heads){
+      h.yRow += h.speed * config.speed * dt; // move in rows
+      // when passing into next row, write a new char there
+      const row = Math.floor(h.yRow);
+      if(row >= 0 && row < state.rows){
+        // head is at (row, h.col)
+        state.chars[row][h.col] = pickChar();
+        state.alpha[row][h.col] = 1.0; // fresh, full bright (non-lead gets green w/ alpha; lead map makes it bright)
+        if(!leadMap[row]) leadMap[row] = new Set();
+        leadMap[row].add(h.col);
+      }
+      // recycle when fully below
+      if(h.yRow > state.rows + 8){
+        h.yRow = rand(-state.rows*0.5, 0);
+        h.speed *= rand(0.85, 1.20);
+      }
+    }
+
+    // apply fade & rare glitches
+    for(let r=0;r<state.rows;r++){
+      for(let c=0;c<state.cols;c++){
+        // skip fresh leads (drawn bright); we still decay the stored alpha for consistency
+        state.alpha[r][c] *= decay;
+
+        // Rare shift/glitch: only when visible and not just written as a lead
+        if(state.alpha[r][c] > 0.05 && Math.random() < config.glitchChance){
+          state.chars[r][c] = pickChar();
+        }
+      }
+    }
+
+    // draw
+    drawBackground();
+    renderGrid(leadMap);
+
+    if(!config.paused){
+      requestAnimationFrame(tick);
+    } else {
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(0,0,state.w,state.h);
+      ctx.fillStyle = '#0f0';
+      ctx.font = `${16*state.dpr}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+      ctx.fillText('⏸ Paused', 10*state.dpr, 10*state.dpr);
+    }
+  }
+
+  function start(){
+    resize();
+    // paint solid bg once
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0,0,state.w,state.h);
+    updateHUD();
+    requestAnimationFrame(tick);
+  }
+
+  // --- Keyboard controls ---
+  window.addEventListener('keydown', (e) => {
+    if(e.key === 'h' || e.key === 'H'){
+      hud.classList.toggle('hidden');
+      brandEl.classList.toggle('hidden');
+      return;
+    }
+    switch(e.key){
+      case ' ': // pause
+        config.paused = !config.paused;
+        if(!config.paused){ prev = 0; requestAnimationFrame(tick); }
+        e.preventDefault(); break;
+
+      case 's': case 'S': // switch charset
+        config.charsetIndex = (config.charsetIndex + 1) % SETS.length;
+        state.charset = SETS[config.charsetIndex];
+        break;
+
+      case 'g': case 'G': // glow
+        config.glow = !config.glow; break;
+
+      case 'b': case 'B': // bg
+        config.bgMode = (config.bgMode + 1) % 3; break;
+
+      case 'ArrowRight': // faster
+        config.speed = Math.min(3.0, +(config.speed + 0.05).toFixed(2)); updateHUD(); break;
+      case 'ArrowLeft':  // slower
+        config.speed = Math.max(0.1, +(config.speed - 0.05).toFixed(2)); updateHUD(); break;
+
+      case 'ArrowUp':   // more columns
+        config.density = Math.min(1.0, +(config.density + 0.05).toFixed(2)); spawnHeads(); updateHUD(); break;
+      case 'ArrowDown': // fewer columns
+        config.density = Math.max(0.1, +(config.density - 0.05).toFixed(2)); spawnHeads(); updateHUD(); break;
+
+      case '{': // rarer glitches
+        config.glitchChance = Math.max(0.0001, +(config.glitchChance - 0.0005).toFixed(4)); updateHUD(); break;
+      case '}': // more glitches
+        config.glitchChance = Math.min(0.02, +(config.glitchChance + 0.0005).toFixed(4)); updateHUD(); break;
+
+      case '[': // smaller font (more grid cells)
+        config.fontPx = Math.max(10, config.fontPx - 1); resize(); updateHUD(); break;
+      case ']': // larger font
+        config.fontPx = Math.min(48, config.fontPx + 1); resize(); updateHUD(); break;
+
+      case 'r': case 'R': // reset defaults
+        Object.assign(config, { charsetIndex:0, fontPx:18, speed:1.0, density:1.0, glow:true, bgMode:0, paused:false, fadeMs:900, glitchChance:0.002 });
+        resize(); updateHUD(); break;
+    }
+  }, {passive:false});
+
+  window.addEventListener('resize', resize);
+
+  document.addEventListener('visibilitychange', () => {
+    if(document.hidden){ config.paused = true; }
+    else { config.paused = false; prev = 0; requestAnimationFrame(tick); }
+  });
+
+  start();
+})();
